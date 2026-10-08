@@ -327,6 +327,7 @@ static int pmw3610_async_init_check_ob1(const struct device *dev) {
         LOG_ERR("Failed self-test (0x%x)", value);
         return -EINVAL;
     }
+    LOG_INF("PMW3610 self-test passed (OB1=0x%x)", value);
 
     uint8_t product_id = 0x01;
     err = pmw3610_read_reg(dev, PMW3610_REG_PRODUCT_ID, &product_id);
@@ -339,6 +340,7 @@ static int pmw3610_async_init_check_ob1(const struct device *dev) {
         LOG_ERR("Incorrect product id 0x%x (expecting 0x%x)!", product_id, PMW3610_PRODUCT_ID);
         return -EIO;
     }
+    LOG_INF("PMW3610 Product ID: 0x%x", product_id);
 
     return 0;
 }
@@ -438,6 +440,7 @@ static int pmw3610_report_data(const struct device *dev) {
 
 	int err = pmw3610_read(dev, PMW3610_REG_MOTION_BURST, buf, PMW3610_BURST_SIZE);
     if (err) {
+        LOG_ERR("MOTION burst SPI read failed: %d", err);
         return err;
     }
     // LOG_HEXDUMP_DBG(buf, PMW3610_BURST_SIZE, "buf");
@@ -510,15 +513,25 @@ static void pmw3610_gpio_callback(const struct device *gpiob, struct gpio_callba
                                   uint32_t pins) {
     struct pixart_data *data = CONTAINER_OF(cb, struct pixart_data, irq_gpio_cb);
     const struct device *dev = data->dev;
-    pmw3610_set_interrupt(dev, false);
+    LOG_DBG("MOTION IRQ received");
+    int err = pmw3610_set_interrupt(dev, false);
+    if (err) {
+        LOG_ERR("Failed to disable MOTION IRQ: %d", err);
+    }
     k_work_submit(&data->trigger_work);
 }
 
 static void pmw3610_work_callback(struct k_work *work) {
     struct pixart_data *data = CONTAINER_OF(work, struct pixart_data, trigger_work);
     const struct device *dev = data->dev;
-    pmw3610_report_data(dev);
-    pmw3610_set_interrupt(dev, true);
+    int err = pmw3610_report_data(dev);
+    if (err) {
+        LOG_ERR("MOTION work failed: %d", err);
+    }
+    err = pmw3610_set_interrupt(dev, true);
+    if (err) {
+        LOG_ERR("Failed to re-enable MOTION IRQ: %d", err);
+    }
 }
 
 static int pmw3610_init_irq(const struct device *dev) {
